@@ -5,7 +5,8 @@ cd "$(dirname "$0")"
 
 APP=build/Emile.app
 rm -rf build
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 swiftc -O -swift-version 5 -target arm64-apple-macos13.0 main.swift -o "$APP/Contents/MacOS/Emile"
 cp Info.plist "$APP/Contents/Info.plist"
 codesign --force --sign - --identifier com.martinkrotoff.dictee "$APP"
