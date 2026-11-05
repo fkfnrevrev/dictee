@@ -27,5 +27,5 @@ if [[ ! -f "$MODEL_PATH" || "$(checksum)" != "$MODEL_SHA256" ]]; then
 fi
 
 ./build.sh
-open /Applications/Dictee.app
-echo "Dictee est lancee. Autorise le micro et l'Accessibilite (voir README)."
+open /Applications/Emile.app
+echo "Emile est lancee. Autorise le micro et l'Accessibilite (voir README)."

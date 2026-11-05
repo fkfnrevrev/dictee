@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>Dictee</string>
+    <string>Emile</string>
     <key>CFBundleIdentifier</key>
     <string>com.martinkrotoff.dictee</string>
     <key>CFBundleName</key>
-    <string>Dictée</string>
+    <string>Emile</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -19,7 +19,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Dictée écoute le micro pendant que tu maintiens la touche, et transcrit sur ce Mac.</string>
+    <string>Emile écoute le micro pendant que tu maintiens la touche, et transcrit sur ce Mac.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsLocalNetworking</key>

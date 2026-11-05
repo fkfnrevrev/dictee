@@ -1,4 +1,4 @@
-// Dictee : maintiens Commande droite, parle, relache. Le texte s'ecrit au curseur.
+// Emile : maintiens Commande droite, parle, relache. Le texte s'ecrit au curseur.
 // Tout reste sur le Mac : whisper-server n'ecoute que sur 127.0.0.1 et l'audio n'est jamais ecrit sur disque.
 
 import ApplicationServices
@@ -50,7 +50,7 @@ final class WhisperServer {
             try p.run()
             process = p
         } catch {
-            NSLog("Dictee: impossible de lancer whisper-server: \(error)")
+            NSLog("Emile: impossible de lancer whisper-server: \(error)")
         }
     }
 
@@ -309,7 +309,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             } catch {
                 note = "Échec de la transcription"
-                NSLog("Dictee: \(error)")
+                NSLog("Emile: \(error)")
             }
             state = .idle
         }
@@ -358,7 +358,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .recording: symbol = "mic.fill"
         case .transcribing: symbol = "text.bubble"
         }
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Dictee")
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Emile")
         image?.isTemplate = true
         statusItem?.button?.image = image
         statusItem?.button?.contentTintColor = state == .recording ? .systemRed : nil
@@ -392,7 +392,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let login = addItem(to: menu, "Lancer au démarrage du Mac", #selector(toggleLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(.separator())
-        addItem(to: menu, "Quitter Dictée", #selector(quit))
+        addItem(to: menu, "Quitter Emile", #selector(quit))
     }
 
     @discardableResult
@@ -434,7 +434,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 // MARK: - Point d'entree
 
-/// `Dictee --transcribe fichier.wav [langue]` : teste la chaine de transcription sans micro.
+/// `Emile --transcribe fichier.wav [langue]` : teste la chaine de transcription sans micro.
 func runTranscribeTest(path: String, language: String) -> Never {
     let server = WhisperServer()
     Task {

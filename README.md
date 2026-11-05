@@ -1,4 +1,4 @@
-# Dictée
+# Emile
 
 Dictée vocale 100 % locale pour Mac : maintiens **Commande droite**, parle, relâche, et le texte s'écrit au curseur, dans n'importe quelle app.
 
@@ -26,7 +26,7 @@ Le script installe whisper.cpp, télécharge le modèle, compile l'app dans `/Ap
 Il reste deux autorisations à donner :
 
 1. **Micro** : clique sur Autoriser quand macOS le demande.
-2. **Accessibilité** : Réglages Système → Confidentialité et sécurité → Accessibilité, puis active **Dictee**.
+2. **Accessibilité** : Réglages Système → Confidentialité et sécurité → Accessibilité, puis active **Emile**.
 
 ## Utilisation
 
@@ -48,12 +48,12 @@ Le menu de l'icône permet de choisir la langue, de recopier la dernière dicté
 git pull && ./build.sh
 ```
 
-Après une recompilation, macOS peut redemander l'Accessibilité. Si la touche ne réagit plus, retire **Dictee** de la liste puis ajoute-la de nouveau.
+Après une recompilation, macOS peut redemander l'Accessibilité. Si la touche ne réagit plus, retire **Emile** de la liste puis ajoute-la de nouveau.
 
 ## Tester sans micro
 
 ```bash
-/Applications/Dictee.app/Contents/MacOS/Dictee --transcribe fichier.wav fr
+/Applications/Emile.app/Contents/MacOS/Emile --transcribe fichier.wav fr
 ```
 
 Le fichier doit être un WAV 16 kHz mono en 16 bits.
