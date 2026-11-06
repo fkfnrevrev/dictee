@@ -53,7 +53,6 @@ struct HomeContent: View {
             if let saved = model.lastSavedMeeting, model.meeting == nil {
                 SavedBanner(file: MeetingFile(url: saved)) { model.lastSavedMeeting = nil }
             }
-            HowItWorks(folder: folder)
             HStack(alignment: .top, spacing: 18) {
                 Card {
                     VStack(alignment: .leading, spacing: 6) {
@@ -177,7 +176,7 @@ struct MeetingHero: View {
                     .buttonStyle(HeroButton(primary: mode == .online))
                     .disabled(model.phase != .idle)
                 }
-                Text("ou double-appuie sur fn").font(.callout).foregroundStyle(.white.opacity(0.6)).padding(.leading, 4)
+                Text("ou fn + ⌘ droite").font(.callout).foregroundStyle(.white.opacity(0.6)).padding(.leading, 4)
             }
             .padding(.top, 6)
             if !model.screenAudioGranted {
@@ -323,48 +322,6 @@ struct SavedBanner: View {
         case .skipped: return "Trop courte pour un compte rendu."
         case .failed(let message): return message
         }
-    }
-}
-
-/// Les trois etapes, toujours visibles, pour comprendre ou va quoi.
-struct HowItWorks: View {
-    let folder: URL
-
-    var body: some View {
-        let transcripts = MeetingFolder.isCloud(folder) ? folder.lastPathComponent : "ton dossier"
-        let summaries = SummaryService.folder(for: folder).lastPathComponent
-        Card {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Comment ça marche").font(.title2.weight(.semibold))
-                HStack(alignment: .top, spacing: 0) {
-                    step(1, "mic.fill", "Emile écoute",
-                         "Ton micro et, en visio, le son de l'ordi. Tout est transcrit sur ce Mac, l'audio est effacé au fur et à mesure.")
-                    arrow
-                    step(2, "doc.text.fill", "La transcription",
-                         "Tout ce qui s'est dit, avec qui parle et à quelle minute, dans un fichier Word rangé dans \(transcripts).")
-                    arrow
-                    step(3, "sparkles", "Le compte rendu",
-                         "À la fin, Claude lit la transcription et écrit décisions, tâches et chiffres clés dans \(summaries), plus le Journal des réunions.")
-                }
-            }
-        }
-    }
-
-    private var arrow: some View {
-        Image(systemName: "arrow.right").foregroundStyle(.tertiary).padding(.top, 8).padding(.horizontal, 10)
-    }
-
-    private func step(_ number: Int, _ symbol: String, _ title: String, _ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text("\(number)").font(.caption.weight(.bold)).foregroundStyle(.white)
-                    .frame(width: 22, height: 22).background(Circle().fill(emileOrange))
-                Image(systemName: symbol).foregroundStyle(emileOrange)
-                Text(title).font(.headline)
-            }
-            Text(text).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

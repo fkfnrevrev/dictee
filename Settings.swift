@@ -94,7 +94,7 @@ struct SettingsView: View {
 
             Section {
                 TextField("Ton prénom", text: $userName, prompt: Text("Martin"))
-                Picker("Double-appui sur fn", selection: $meetingMode) {
+                Picker("fn + ⌘ droite lance", selection: $meetingMode) {
                     ForEach(MeetingMode.allCases, id: \.self) { Text("Réunion \($0.label.lowercased())").tag($0.rawValue) }
                 }
                 LabeledContent("Dossier") {
@@ -156,7 +156,7 @@ struct SettingsView: View {
 
             Section("Dictée") {
                 LabeledContent("Raccourci") { Text("Maintenir fn 🌐").foregroundStyle(.secondary) }
-                LabeledContent("Réunion") { Text("Double-appui sur fn 🌐").foregroundStyle(.secondary) }
+                LabeledContent("Réunion") { Text("fn 🌐 + ⌘ droite (démarrer et arrêter)").foregroundStyle(.secondary) }
                 Picker("Langue", selection: $language) {
                     Text("Français").tag("fr")
                     Text("English").tag("en")

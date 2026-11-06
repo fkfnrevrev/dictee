@@ -52,7 +52,7 @@ Le menu de l'icône permet aussi de recopier la dernière dictée.
 
 ## Réunions
 
-Lance une réunion depuis l'**Accueil** d'Emile (boutons **En ligne** ou **En présentiel**), depuis l'icône de la barre de menus, ou par un **double-appui sur fn**. Un nouveau double-appui l'arrête.
+Lance une réunion depuis l'**Accueil** d'Emile (boutons **En ligne** ou **En présentiel**), depuis l'icône de la barre de menus, ou avec **fn + Commande droite** (⌘ à droite de la barre d'espace). Le même raccourci l'arrête.
 
 - **En ligne** (Zoom, Meet, Teams…) : Emile capte ton micro et le son de l'ordi séparément. La transcription distingue donc ton prénom et « Interlocuteurs ». Avec des haut-parleurs plutôt qu'un casque, Emile retire les phrases des autres que ton micro a reprises.
 - **En présentiel** : un seul micro, tout le monde est noté « Participants ».

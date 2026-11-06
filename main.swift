@@ -11,8 +11,9 @@ let hotkeyFlag = CGEventFlags.maskSecondaryFn.rawValue
 let minimumDuration: TimeInterval = 0.3
 let maximumDuration: TimeInterval = 300
 let maximumMeeting: TimeInterval = 4 * 3600
-/// Deux appuis brefs sur fn dans ce delai demarrent ou arretent une reunion.
-let doubleTapWindow: TimeInterval = 0.4
+/// fn + Commande droite demarre ou arrete une reunion.
+let rightCommandKeycode: Int64 = 54
+let rightCommandFlag: UInt64 = 0x10  // NX_DEVICERCMDKEYMASK : seulement la touche de droite
 let serverPort = 8178
 let serverBase = URL(string: "http://127.0.0.1:\(serverPort)")!
 let serverBinary = "/opt/homebrew/bin/whisper-server"
@@ -217,8 +218,6 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastText = ""
     private var meeting: MeetingSession?
     private var meetingLimit: Timer?
-    private var fnDownAt: Date?
-    private var lastTapUp: Date?
     private var swallowRelease = false
 
     private var language: String {
@@ -307,32 +306,31 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
         case .flagsChanged:
-            guard event.getIntegerValueField(.keyboardEventKeycode) == hotkeyKeycode else { return }
-            let now = Date()
-            if event.flags.rawValue & hotkeyFlag != 0 {
-                // Deuxieme appui bref : demarre ou arrete une reunion.
-                if let lastTapUp, now.timeIntervalSince(lastTapUp) < doubleTapWindow {
-                    self.lastTapUp = nil
-                    swallowRelease = true
-                    if state == .recording { cancel() }
-                    toggleMeeting()
+            let keycode = event.getIntegerValueField(.keyboardEventKeycode)
+            let fnDown = event.flags.rawValue & hotkeyFlag != 0
+            let rightCommandDown = event.flags.rawValue & rightCommandFlag != 0
+            if keycode == rightCommandKeycode {
+                // fn deja tenue, puis Commande droite : reunion.
+                if rightCommandDown && fnDown { meetingShortcut() }
+                return
+            }
+            guard keycode == hotkeyKeycode else { return }
+            if fnDown {
+                // Commande droite deja tenue, puis fn : reunion aussi.
+                if rightCommandDown {
+                    meetingShortcut()
                     return
                 }
-                fnDownAt = now
                 begin()
             } else {
                 if swallowRelease {
                     swallowRelease = false
                     return
                 }
-                let short = fnDownAt.map { now.timeIntervalSince($0) < 0.25 } ?? false
-                lastTapUp = short ? now : nil
-                fnDownAt = nil
                 finish()
             }
         default:
             // fn + autre touche (fleches, F1...) ou clic : c'est un raccourci, pas une dictee.
-            lastTapUp = nil
             if state == .recording { cancel() }
         }
     }
@@ -411,6 +409,13 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: Reunion
+
+    private func meetingShortcut() {
+        // Relacher fn ensuite ne doit pas finir une dictee.
+        swallowRelease = true
+        if state == .recording { cancel() }
+        toggleMeeting()
+    }
 
     private func toggleMeeting() {
         if state == .meeting {
@@ -522,7 +527,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .idle: return eventTap == nil ? "En attente de l'autorisation Accessibilité" : "Prêt : maintiens fn"
         case .recording: return "Écoute…"
         case .transcribing: return meeting != nil ? "Enregistrement de la réunion…" : "Transcription…"
-        case .meeting: return "Réunion en cours : double-appuie sur fn pour arrêter"
+        case .meeting: return "Réunion en cours : fn + ⌘ droite pour arrêter"
         }
     }
 
