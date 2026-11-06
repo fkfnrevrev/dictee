@@ -38,9 +38,13 @@ Il reste deux autorisations à donner :
 | Bulle de texte | Transcription |
 | Triangle | Autorisation manquante ou erreur |
 
+Une petite barre flottante en bas de l'écran s'agrandit pendant la dictée, et un son discret marque le début et la fin.
+
+La fenêtre de réglages s'ouvre au lancement d'Emile, ou depuis l'icône de la barre de menus → **Réglages…**. Tu peux y régler la barre (couleur, taille, opacité, hauteur), le son, la langue et le lancement au démarrage du Mac.
+
 Commande droite + une autre touche (comme `Cmd` + `C`) annule la dictée, donc tes raccourcis continuent de marcher.
 
-Le menu de l'icône permet de choisir la langue, de recopier la dernière dictée et de lancer l'app au démarrage du Mac.
+Le menu de l'icône permet aussi de recopier la dernière dictée.
 
 ## Mettre à jour
 

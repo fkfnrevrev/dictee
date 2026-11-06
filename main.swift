@@ -114,6 +114,8 @@ final class Recorder {
     private var engine: AVAudioEngine?
     private var samples: [Int16] = []
     private let lock = NSLock()
+    /// Appele sur le fil principal avec le volume courant, entre 0 et 1.
+    var onLevel: ((Double) -> Void)?
 
     func start() throws {
         lock.withLock { samples.removeAll(keepingCapacity: true) }
@@ -125,7 +127,7 @@ final class Recorder {
         guard inputFormat.sampleRate > 0, let converter = AVAudioConverter(from: inputFormat, to: target) else {
             throw NSError(domain: "Dictee", code: 2, userInfo: [NSLocalizedDescriptionKey: "Micro indisponible"])
         }
-        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
             let capacity = AVAudioFrameCount(Double(buffer.frameLength) * 16000 / inputFormat.sampleRate) + 64
             guard let self, let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
             var consumed = false
@@ -139,6 +141,13 @@ final class Recorder {
             guard error == nil, let channel = output.int16ChannelData?[0] else { return }
             let chunk = UnsafeBufferPointer(start: channel, count: Int(output.frameLength))
             self.lock.withLock { self.samples.append(contentsOf: chunk) }
+            if let onLevel = self.onLevel, !chunk.isEmpty {
+                // Volume en dB ramene entre 0 (silence) et 1 (voix forte), pour la barre.
+                let energy = chunk.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(chunk.count)
+                let decibels = 20 * log10(max(energy.squareRoot(), 1) / 32768)
+                let level = min(1, max(0, (decibels + 55) / 40))
+                DispatchQueue.main.async { onLevel(level) }
+            }
         }
         engine.prepare()
         try engine.start()
@@ -154,14 +163,14 @@ final class Recorder {
     }
 }
 
-func wavData(from samples: [Int16]) -> Data {
+func wavData(from samples: [Int16], sampleRate: UInt32 = 16000) -> Data {
     func le<T: FixedWidthInteger>(_ value: T) -> Data { withUnsafeBytes(of: value.littleEndian) { Data($0) } }
     let byteCount = UInt32(samples.count * 2)
     var data = Data("RIFF".utf8)
     data += le(36 + byteCount)
     data += Data("WAVEfmt ".utf8)
     data += le(UInt32(16)) + le(UInt16(1)) + le(UInt16(1))
-    data += le(UInt32(16000)) + le(UInt32(32000)) + le(UInt16(2)) + le(UInt16(16))
+    data += le(sampleRate) + le(sampleRate * 2) + le(UInt16(2)) + le(UInt16(16))
     data += Data("data".utf8)
     data += le(byteCount)
     samples.withUnsafeBytes { data.append(contentsOf: $0) }
@@ -181,18 +190,22 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private let server = WhisperServer()
     private let recorder = Recorder()
+    private let settingsWindow = SettingsWindow()
+    private var overlay: OverlayPanel?
     private var statusItem: NSStatusItem!
-    private var state = State.loading { didSet { refreshIcon() } }
-    private var note: String?
+    private var state = State.loading { didSet { stateChanged() } }
+    private var note: String? { didSet { stateChanged() } }
     private var eventTap: CFMachPort?
     private var permissionTimer: Timer?
     private var startedAt = Date()
     private var limitTimer: Timer?
+    private var confirmWork: DispatchWorkItem?
+    private var confirmed = false
     private var lastText = ""
 
     private var language: String {
-        get { UserDefaults.standard.string(forKey: "language") ?? "fr" }
-        set { UserDefaults.standard.set(newValue, forKey: "language") }
+        get { UserDefaults.standard.string(forKey: Pref.language) ?? "fr" }
+        set { UserDefaults.standard.set(newValue, forKey: Pref.language) }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -200,7 +213,9 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
-        refreshIcon()
+        overlay = OverlayPanel(model: appModel)
+        recorder.onLevel = { level in appModel.push(level: level) }
+        stateChanged()
 
         AVCaptureDevice.requestAccess(for: .audio) { _ in }
         let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
@@ -214,20 +229,33 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
+        if !launchedAsLoginItem() { settingsWindow.show() }
+
         Task { @MainActor in
             await server.start()
             if await server.waitUntilReady() {
                 state = .idle
             } else {
                 note = "Le moteur Whisper n'a pas démarré"
-                refreshIcon()
             }
         }
+    }
+
+    /// Clic sur l'app alors qu'elle tourne deja : on rouvre les reglages.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        settingsWindow.show()
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         _ = recorder.stop()
         server.stop()
+    }
+
+    private func launchedAsLoginItem() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent else { return false }
+        return event.eventID == kAEOpenApplication
+            && event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
     }
 
     // MARK: Raccourci clavier
@@ -248,7 +276,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         eventTap = tap
         CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
-        refreshIcon()
+        stateChanged()
     }
 
     fileprivate func handle(type: CGEventType, event: CGEvent) {
@@ -272,28 +300,46 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
             try recorder.start()
         } catch {
             note = error.localizedDescription
-            refreshIcon()
             return
         }
         note = nil
         startedAt = Date()
+        confirmed = false
         state = .recording
+        overlay?.reposition()
+        // Le micro demarre tout de suite pour ne pas couper le premier mot, mais le son et la barre
+        // attendent un instant : un raccourci comme Cmd+C ne declenche ainsi ni l'un ni l'autre.
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.state == .recording else { return }
+            self.confirmed = true
+            appModel.phase = .recording
+            Sounds.play(start: true)
+        }
+        confirmWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
         // Securite : le micro ne reste jamais ouvert si le relachement de la touche est manque.
         limitTimer = Timer.scheduledTimer(withTimeInterval: maximumDuration, repeats: false) { [weak self] _ in
             self?.finish()
         }
     }
 
-    private func cancel() {
+    private func stopRecording() -> [Int16] {
+        confirmWork?.cancel()
         limitTimer?.invalidate()
-        _ = recorder.stop()
+        let samples = recorder.stop()
+        appModel.level = 0
+        return samples
+    }
+
+    private func cancel() {
+        _ = stopRecording()
         state = .idle
     }
 
     private func finish() {
         guard state == .recording else { return }
-        limitTimer?.invalidate()
-        let samples = recorder.stop()
+        let samples = stopRecording()
+        if confirmed { Sounds.play(start: false) }
         guard Date().timeIntervalSince(startedAt) >= minimumDuration, !isSilent(samples) else {
             state = .idle
             return
@@ -350,7 +396,26 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Interface
 
-    private func refreshIcon() {
+    private var statusText: String {
+        if let note { return note }
+        switch state {
+        case .loading: return "Chargement du modèle…"
+        case .idle: return eventTap == nil ? "En attente de l'autorisation Accessibilité" : "Prêt : maintiens Commande droite"
+        case .recording: return "Écoute…"
+        case .transcribing: return "Transcription…"
+        }
+    }
+
+    private func stateChanged() {
+        switch state {
+        case .loading: appModel.phase = .loading
+        case .idle: appModel.phase = .idle
+        case .recording: break  // la barre s'agrandit apres confirmation, voir begin()
+        case .transcribing: appModel.phase = .transcribing
+        }
+        appModel.status = statusText
+        appModel.accessibilityGranted = eventTap != nil
+
         let symbol: String
         switch state {
         case .loading: symbol = "hourglass"
@@ -366,15 +431,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let status: String
-        switch state {
-        case .loading: status = "Chargement du modèle…"
-        case .idle: status = "Prêt : maintiens Commande droite"
-        case .recording: status = "Écoute…"
-        case .transcribing: status = "Transcription…"
-        }
-        menu.addItem(NSMenuItem(title: note ?? status, action: nil, keyEquivalent: ""))
-
+        menu.addItem(NSMenuItem(title: statusText, action: nil, keyEquivalent: ""))
+        addItem(to: menu, "Réglages…", #selector(openSettings), key: ",")
         if eventTap == nil {
             addItem(to: menu, "Autoriser l'accessibilité…", #selector(openAccessibility))
         }
@@ -389,19 +447,19 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let copy = addItem(to: menu, "Copier la dernière dictée", #selector(copyLast))
         copy.isEnabled = !lastText.isEmpty
-        let login = addItem(to: menu, "Lancer au démarrage du Mac", #selector(toggleLogin))
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(.separator())
-        addItem(to: menu, "Quitter Emile", #selector(quit))
+        addItem(to: menu, "Quitter Emile", #selector(quit), key: "q")
     }
 
     @discardableResult
-    private func addItem(to menu: NSMenu, _ title: String, _ action: Selector) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+    private func addItem(to menu: NSMenu, _ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.target = self
         menu.addItem(item)
         return item
     }
+
+    @objc private func openSettings() { settingsWindow.show() }
 
     @objc private func chooseLanguage(_ sender: NSMenuItem) {
         if let code = sender.representedObject as? String { language = code }
@@ -412,22 +470,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSPasteboard.general.setString(lastText, forType: .string)
     }
 
-    @objc private func openAccessibility() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-    }
-
-    @objc private func toggleLogin() {
-        do {
-            if SMAppService.mainApp.status == .enabled {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
-        } catch {
-            note = "Démarrage automatique indisponible"
-            refreshIcon()
-        }
-    }
+    @objc private func openAccessibility() { openAccessibilitySettings() }
 
     @objc private func quit() { NSApp.terminate(nil) }
 }
@@ -462,7 +505,24 @@ if arguments.count >= 3, arguments[1] == "--transcribe" {
     runTranscribeTest(path: arguments[2], language: arguments.count > 3 ? arguments[3] : "fr")
 }
 
+// Un seul Emile a la fois : si un autre tourne deja, on lui demande d'ouvrir ses reglages et on s'arrete.
+if let running = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+    .first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }),
+   let url = running.bundleURL {
+    let done = DispatchSemaphore(value: 0)
+    NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in done.signal() }
+    _ = done.wait(timeout: .now() + 3)
+    exit(0)
+}
+
+Pref.register()
 let controller = Controller()
+
+// Un `kill` (comme pendant une reinstallation) ferme l'app proprement, moteur Whisper compris.
+signal(SIGTERM, SIG_IGN)
+let terminationSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+terminationSource.setEventHandler { NSApp.terminate(nil) }
+terminationSource.resume()
 let application = NSApplication.shared
 application.setActivationPolicy(.accessory)
 application.delegate = controller
