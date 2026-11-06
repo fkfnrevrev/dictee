@@ -15,18 +15,23 @@ enum Pref {
     static let soundName = "soundName"
     static let soundAtEnd = "soundAtEnd"
     static let soundVolume = "soundVolume"
+    static let userName = "userName"
+    static let meetingFolder = "meetingFolder"
+    static let meetingMode = "meetingMode"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
             language: "fr",
             barVisible: true, barAlways: true, barSize: 1.0, barOpacity: 0.92, barOffset: 14.0, barStyle: "orange",
             soundOn: true, soundName: "bulle", soundAtEnd: true, soundVolume: 0.35,
+            userName: NSFullUserName().split(separator: " ").first.map(String.init) ?? "Moi",
+            meetingFolder: "", meetingMode: MeetingMode.online.rawValue,
         ])
     }
 }
 
 final class AppModel: ObservableObject {
-    enum Phase { case loading, idle, recording, transcribing }
+    enum Phase { case loading, idle, recording, transcribing, meeting }
 
     @Published var phase = Phase.loading
     @Published var level = 0.0
@@ -37,6 +42,16 @@ final class AppModel: ObservableObject {
     @Published var demoPhase: Phase?
 
     var displayedPhase: Phase { demoPhase ?? phase }
+
+    // Reunion en cours, affichee dans l'accueil et dans la barre.
+    @Published var meeting: LiveMeeting?
+    @Published var meetingTitle = ""
+    @Published var lastSavedMeeting: URL?
+    @Published var screenAudioGranted = CGPreflightScreenCaptureAccess()
+    var onStartMeeting: ((MeetingMode) -> Void)?
+    var onStopMeeting: (() -> Void)?
+
+    func refreshPermissions() { screenAudioGranted = CGPreflightScreenCaptureAccess() }
 
     /// Lisse le volume pour que les vagues bougent sans a-coups.
     func push(level newLevel: Double) {
@@ -70,6 +85,10 @@ final class AppModel: ObservableObject {
 }
 
 let appModel = AppModel()
+
+func openScreenRecordingSettings() {
+    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+}
 
 func openAccessibilitySettings() {
     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)

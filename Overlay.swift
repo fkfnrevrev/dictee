@@ -34,9 +34,9 @@ struct OverlayView: View {
 
     var body: some View {
         let phase = model.displayedPhase
-        let active = phase == .recording || phase == .transcribing
+        let active = phase == .recording || phase == .transcribing || phase == .meeting
         let scale = CGFloat(size)
-        let width = (active ? 68 : 38) * scale
+        let width = (phase == .meeting ? 78 : active ? 68 : 38) * scale
         let height = (active ? 20 : 8) * scale
         let shown = visible && (always || active)
 
@@ -49,6 +49,8 @@ struct OverlayView: View {
                     .transition(.opacity)
             } else if phase == .transcribing {
                 ThinkingDots(scale: scale).transition(.opacity)
+            } else if phase == .meeting, let start = model.meeting?.startedAt {
+                MeetingBadge(start: start, level: model.level, scale: scale).transition(.opacity)
             }
         }
         .frame(width: width, height: height)
@@ -79,6 +81,29 @@ struct LevelBars: View {
                         .frame(width: 2 * scale,
                                height: max(2 * scale, maxHeight * CGFloat(min(1, level * weights[i] * wobble))))
                 }
+            }
+        }
+    }
+}
+
+/// Pendant une reunion : un point rouge qui respire avec la voix, et le temps ecoule.
+struct MeetingBadge: View {
+    let start: Date
+    var level: Double
+    var scale: CGFloat
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { context in
+            HStack(spacing: 5 * scale) {
+                Circle()
+                    .fill(Color(red: 1, green: 0.27, blue: 0.23))
+                    .frame(width: 6 * scale, height: 6 * scale)
+                    .scaleEffect(1 + 0.35 * min(1, level))
+                    .animation(.easeOut(duration: 0.15), value: level)
+                Text(MeetingDocument.timestamp(context.date.timeIntervalSince(start)))
+                    .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.95))
             }
         }
     }

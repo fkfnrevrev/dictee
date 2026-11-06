@@ -16,6 +16,10 @@ struct SettingsView: View {
     @AppStorage(Pref.soundAtEnd) private var soundAtEnd = true
     @AppStorage(Pref.soundVolume) private var soundVolume = 0.35
     @AppStorage(Pref.language) private var language = "fr"
+    @AppStorage(Pref.userName) private var userName = ""
+    @AppStorage(Pref.meetingMode) private var meetingMode = MeetingMode.online.rawValue
+    @AppStorage(Pref.meetingFolder) private var meetingFolder = ""
+    @ObservedObject private var library = MeetingLibrary.shared
 
     var body: some View {
         Form {
@@ -86,8 +90,41 @@ struct SettingsView: View {
                 .disabled(!soundOn)
             }
 
+            Section {
+                TextField("Ton prénom", text: $userName, prompt: Text("Martin"))
+                Picker("Double-appui sur fn", selection: $meetingMode) {
+                    ForEach(MeetingMode.allCases, id: \.self) { Text("Réunion \($0.label.lowercased())").tag($0.rawValue) }
+                }
+                LabeledContent("Dossier") {
+                    HStack {
+                        Text(MeetingFolder.shortPath(library.folder)).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.head)
+                        Button("Choisir…") { chooseFolder() }
+                        if !meetingFolder.isEmpty {
+                            Button("Par défaut") {
+                                meetingFolder = ""
+                                library.refresh()
+                            }
+                        }
+                    }
+                }
+                LabeledContent("Son des autres (en ligne)") {
+                    if model.screenAudioGranted {
+                        Label("Autorisé", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    } else {
+                        Button("Autoriser l'enregistrement de l'écran") { openScreenRecordingSettings() }
+                    }
+                }
+            } header: {
+                Text("Réunions")
+            } footer: {
+                Text("Le prénom signe tes transcriptions dans le dossier partagé. Emile n'enregistre jamais l'image de l'écran : macOS demande cette autorisation pour laisser capter le son des visios.")
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Dictée") {
                 LabeledContent("Raccourci") { Text("Maintenir fn 🌐").foregroundStyle(.secondary) }
+                LabeledContent("Réunion") { Text("Double-appui sur fn 🌐").foregroundStyle(.secondary) }
                 Picker("Langue", selection: $language) {
                     Text("Français").tag("fr")
                     Text("English").tag("en")
@@ -101,20 +138,40 @@ struct SettingsView: View {
         .frame(maxWidth: 640)
         .frame(maxWidth: .infinity)
         .onChange(of: soundName) { _ in Sounds.play(start: true, preview: true) }
+        .onAppear {
+            model.refreshPermissions()
+            library.refresh()
+        }
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choisir"
+        panel.message = "Où ranger les transcriptions de réunion ?"
+        panel.directoryURL = library.folder
+        if panel.runModal() == .OK, let url = panel.url {
+            meetingFolder = url.path
+            library.refresh()
+        }
     }
 }
 
 /// Fenetre principale : un menu a gauche, comme Wispr Flow.
 struct MainView: View {
-    enum Page: Hashable { case stats, settings }
+    enum Page: Hashable { case home, meetings, stats, settings }
 
     @ObservedObject var model: AppModel
     @ObservedObject var stats: StatsStore
-    @State private var page: Page? = .stats
+    @State private var page: Page? = .home
 
     var body: some View {
         NavigationSplitView {
             List(selection: $page) {
+                Label("Accueil", systemImage: "house").tag(Page.home)
+                Label("Réunions", systemImage: "waveform").tag(Page.meetings)
                 Label("Statistiques", systemImage: "chart.bar.xaxis").tag(Page.stats)
                 Label("Réglages", systemImage: "gearshape").tag(Page.settings)
             }
@@ -129,7 +186,11 @@ struct MainView: View {
             }
             .navigationSplitViewColumnWidth(190)
         } detail: {
-            switch page ?? .stats {
+            switch page ?? .home {
+            case .home:
+                HomeView(model: model, stats: stats, library: MeetingLibrary.shared, log: MeetingLog.shared,
+                         onSeeAll: { page = .meetings })
+            case .meetings: MeetingsView(library: MeetingLibrary.shared, model: model)
             case .stats: StatsView(stats: stats)
             case .settings: SettingsView(model: model)
             }

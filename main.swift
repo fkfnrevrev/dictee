@@ -10,6 +10,9 @@ let hotkeyKeycode: Int64 = 63  // fn (globe), en bas a gauche du clavier
 let hotkeyFlag = CGEventFlags.maskSecondaryFn.rawValue
 let minimumDuration: TimeInterval = 0.3
 let maximumDuration: TimeInterval = 300
+let maximumMeeting: TimeInterval = 4 * 3600
+/// Deux appuis brefs sur fn dans ce delai demarrent ou arretent une reunion.
+let doubleTapWindow: TimeInterval = 0.4
 let serverPort = 8178
 let serverBase = URL(string: "http://127.0.0.1:\(serverPort)")!
 let serverBinary = "/opt/homebrew/bin/whisper-server"
@@ -71,16 +74,24 @@ final class WhisperServer {
 }
 
 func transcribe(wav: Data, language: String) async throws -> String {
+    let json = try await inference(wav: wav, language: language, format: "json",
+                                   prompt: "Bonjour, voici une dictée avec une ponctuation correcte.")
+    guard let text = json["text"] as? String else { throw invalidResponse }
+    return cleaned(text)
+}
+
+private let invalidResponse = NSError(domain: "Dictee", code: 1, userInfo: [NSLocalizedDescriptionKey: "Réponse invalide du serveur"])
+
+/// Envoie un WAV au serveur Whisper local et renvoie sa reponse JSON.
+func inference(wav: Data, language: String, format: String, prompt: String) async throws -> [String: Any] {
     let boundary = "dictee-\(UUID().uuidString)"
     var body = Data()
     func field(_ name: String, _ value: String) {
         body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".data(using: .utf8)!)
     }
     field("language", language)
-    field("response_format", "json")
-    if language == "fr" {
-        field("prompt", "Bonjour, voici une dictée avec une ponctuation correcte.")
-    }
+    field("response_format", format)
+    if language == "fr" { field("prompt", prompt) }
     body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
     body.append(wav)
     body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
@@ -93,10 +104,9 @@ func transcribe(wav: Data, language: String) async throws -> String {
 
     let (data, response) = try await URLSession.shared.data(for: request)
     guard (response as? HTTPURLResponse)?.statusCode == 200,
-          let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let text = json["text"] as? String
-    else { throw NSError(domain: "Dictee", code: 1, userInfo: [NSLocalizedDescriptionKey: "Réponse invalide du serveur"]) }
-    return cleaned(text)
+          let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { throw invalidResponse }
+    return json
 }
 
 /// Retire les annotations et les textes que Whisper invente sur du silence.
@@ -123,35 +133,30 @@ final class Recorder {
         let engine = AVAudioEngine()
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
-        let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
-        guard inputFormat.sampleRate > 0, let converter = AVAudioConverter(from: inputFormat, to: target) else {
+        guard let resampler = Resampler(from: inputFormat) else {
             throw NSError(domain: "Dictee", code: 2, userInfo: [NSLocalizedDescriptionKey: "Micro indisponible"])
         }
         input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
-            let capacity = AVAudioFrameCount(Double(buffer.frameLength) * 16000 / inputFormat.sampleRate) + 64
-            guard let self, let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
-            var consumed = false
-            var error: NSError?
-            converter.convert(to: output, error: &error) { _, status in
-                if consumed { status.pointee = .noDataNow; return nil }
-                consumed = true
-                status.pointee = .haveData
-                return buffer
-            }
-            guard error == nil, let channel = output.int16ChannelData?[0] else { return }
-            let chunk = UnsafeBufferPointer(start: channel, count: Int(output.frameLength))
+            guard let self else { return }
+            let chunk = resampler.convert(buffer)
             self.lock.withLock { self.samples.append(contentsOf: chunk) }
             if let onLevel = self.onLevel, !chunk.isEmpty {
-                // Volume en dB ramene entre 0 (silence) et 1 (voix forte), pour la barre.
-                let energy = chunk.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(chunk.count)
-                let decibels = 20 * log10(max(energy.squareRoot(), 1) / 32768)
-                let level = min(1, max(0, (decibels + 55) / 40))
+                let level = audioLevel(chunk)
                 DispatchQueue.main.async { onLevel(level) }
             }
         }
         engine.prepare()
         try engine.start()
         self.engine = engine
+    }
+
+    /// Renvoie les echantillons captes depuis le dernier appel, sans arreter le micro.
+    func take() -> [Int16] {
+        lock.withLock {
+            let chunk = samples
+            samples.removeAll(keepingCapacity: true)
+            return chunk
+        }
     }
 
     /// Arrete le micro et renvoie les echantillons captes (16 kHz, mono).
@@ -177,6 +182,14 @@ func wavData(from samples: [Int16], sampleRate: UInt32 = 16000) -> Data {
     return data
 }
 
+/// Volume en dB ramene entre 0 (silence) et 1 (voix forte), pour la barre.
+func audioLevel(_ chunk: [Int16]) -> Double {
+    guard !chunk.isEmpty else { return 0 }
+    let energy = chunk.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(chunk.count)
+    let decibels = 20 * log10(max(energy.squareRoot(), 1) / 32768)
+    return min(1, max(0, (decibels + 55) / 40))
+}
+
 func isSilent(_ samples: [Int16]) -> Bool {
     guard !samples.isEmpty else { return true }
     let energy = samples.reduce(0.0) { $0 + Double($1) * Double($1) }
@@ -186,7 +199,7 @@ func isSilent(_ samples: [Int16]) -> Bool {
 // MARK: - Application barre de menus
 
 final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    enum State { case loading, idle, recording, transcribing }
+    enum State { case loading, idle, recording, transcribing, meeting }
 
     private let server = WhisperServer()
     private let recorder = Recorder()
@@ -202,6 +215,11 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var confirmWork: DispatchWorkItem?
     private var confirmed = false
     private var lastText = ""
+    private var meeting: MeetingSession?
+    private var meetingLimit: Timer?
+    private var fnDownAt: Date?
+    private var lastTapUp: Date?
+    private var swallowRelease = false
 
     private var language: String {
         get { UserDefaults.standard.string(forKey: Pref.language) ?? "fr" }
@@ -215,6 +233,9 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
         overlay = OverlayPanel(model: appModel)
         recorder.onLevel = { level in appModel.push(level: level) }
+        appModel.onStartMeeting = { [weak self] mode in self?.startMeeting(mode) }
+        appModel.onStopMeeting = { [weak self] in self?.stopMeeting() }
+        MeetingLibrary.shared.refresh()
         stateChanged()
 
         AVCaptureDevice.requestAccess(for: .audio) { _ in }
@@ -248,6 +269,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        meeting?.emergencySave()
         _ = recorder.stop()
         server.stop()
     }
@@ -285,9 +307,31 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
         case .flagsChanged:
             guard event.getIntegerValueField(.keyboardEventKeycode) == hotkeyKeycode else { return }
-            if event.flags.rawValue & hotkeyFlag != 0 { begin() } else { finish() }
+            let now = Date()
+            if event.flags.rawValue & hotkeyFlag != 0 {
+                // Deuxieme appui bref : demarre ou arrete une reunion.
+                if let lastTapUp, now.timeIntervalSince(lastTapUp) < doubleTapWindow {
+                    self.lastTapUp = nil
+                    swallowRelease = true
+                    if state == .recording { cancel() }
+                    toggleMeeting()
+                    return
+                }
+                fnDownAt = now
+                begin()
+            } else {
+                if swallowRelease {
+                    swallowRelease = false
+                    return
+                }
+                let short = fnDownAt.map { now.timeIntervalSince($0) < 0.25 } ?? false
+                lastTapUp = short ? now : nil
+                fnDownAt = nil
+                finish()
+            }
         default:
             // fn + autre touche (fleches, F1...) ou clic : c'est un raccourci, pas une dictee.
+            lastTapUp = nil
             if state == .recording { cancel() }
         }
     }
@@ -365,6 +409,75 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    // MARK: Reunion
+
+    private func toggleMeeting() {
+        if state == .meeting {
+            stopMeeting()
+        } else {
+            let mode = MeetingMode(rawValue: UserDefaults.standard.string(forKey: Pref.meetingMode) ?? "") ?? .online
+            startMeeting(mode)
+        }
+    }
+
+    private func startMeeting(_ mode: MeetingMode) {
+        guard state == .idle else { return }
+        let author = UserDefaults.standard.string(forKey: Pref.userName) ?? "Moi"
+        let session = MeetingSession(mode: mode, author: author.isEmpty ? "Moi" : author,
+                                     folder: MeetingFolder.current(), language: language)
+        session.onUpdate = { [weak session] lines in
+            appModel.meeting?.lines = Array(lines.suffix(4))
+            appModel.meeting?.words = session?.wordCount ?? 0
+        }
+        session.onWarning = { appModel.meeting?.warning = $0 }
+        session.onLevel = { appModel.push(level: $0) }
+        meeting = session
+        note = nil
+        appModel.meetingTitle = ""
+        appModel.meeting = LiveMeeting(startedAt: session.startedAt, mode: mode, fileURL: session.fileURL)
+        state = .meeting
+        overlay?.reposition()
+        Sounds.play(start: true)
+        meetingLimit = Timer.scheduledTimer(withTimeInterval: maximumMeeting, repeats: false) { [weak self] _ in
+            self?.stopMeeting()
+        }
+        Task { @MainActor in
+            do {
+                try await session.start()
+            } catch {
+                meetingLimit?.invalidate()
+                meeting = nil
+                appModel.meeting = nil
+                state = .idle
+                note = "Réunion impossible : \(error.localizedDescription)"
+            }
+            appModel.refreshPermissions()
+        }
+    }
+
+    private func stopMeeting() {
+        guard state == .meeting, let session = meeting else { return }
+        meetingLimit?.invalidate()
+        appModel.meeting?.saving = true
+        appModel.level = 0
+        state = .transcribing
+        Sounds.play(start: false)
+        session.stop(title: appModel.meetingTitle) { [weak self] url in
+            guard let self else { return }
+            if let url {
+                MeetingLog.shared.add(MeetingRecord(date: session.startedAt, seconds: Date().timeIntervalSince(session.startedAt),
+                                                    words: session.wordCount))
+                appModel.lastSavedMeeting = url
+            } else {
+                self.note = "Réunion terminée : rien n'a été transcrit"
+            }
+            self.meeting = nil
+            appModel.meeting = nil
+            MeetingLibrary.shared.refresh()
+            self.state = .idle
+        }
+    }
+
     /// Colle le texte avec Cmd+V puis rend au presse-papiers son contenu d'origine.
     private func paste(_ text: String) {
         let pasteboard = NSPasteboard.general
@@ -406,7 +519,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .loading: return "Chargement du modèle…"
         case .idle: return eventTap == nil ? "En attente de l'autorisation Accessibilité" : "Prêt : maintiens fn"
         case .recording: return "Écoute…"
-        case .transcribing: return "Transcription…"
+        case .transcribing: return meeting != nil ? "Enregistrement de la réunion…" : "Transcription…"
+        case .meeting: return "Réunion en cours : double-appuie sur fn pour arrêter"
         }
     }
 
@@ -416,6 +530,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .idle: appModel.phase = .idle
         case .recording: break  // la barre s'agrandit apres confirmation, voir begin()
         case .transcribing: appModel.phase = .transcribing
+        case .meeting: appModel.phase = .meeting
         }
         appModel.status = statusText
         appModel.accessibilityGranted = eventTap != nil
@@ -426,11 +541,12 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .idle: symbol = (note != nil || eventTap == nil) ? "exclamationmark.triangle" : "mic"
         case .recording: symbol = "mic.fill"
         case .transcribing: symbol = "text.bubble"
+        case .meeting: symbol = "record.circle"
         }
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Emile")
         image?.isTemplate = true
         statusItem?.button?.image = image
-        statusItem?.button?.contentTintColor = state == .recording ? .systemRed : nil
+        statusItem?.button?.contentTintColor = state == .recording || state == .meeting ? .systemRed : nil
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -440,6 +556,18 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if eventTap == nil {
             addItem(to: menu, "Autoriser l'accessibilité…", #selector(openAccessibility))
         }
+        menu.addItem(.separator())
+
+        if state == .meeting {
+            addItem(to: menu, "Arrêter la réunion et l'enregistrer", #selector(stopMeetingFromMenu))
+        } else {
+            for mode in MeetingMode.allCases {
+                let item = addItem(to: menu, "Démarrer une réunion \(mode.label.lowercased())", #selector(startMeetingFromMenu(_:)))
+                item.representedObject = mode.rawValue
+                item.isEnabled = state == .idle
+            }
+        }
+        addItem(to: menu, "Ouvrir le dossier des réunions", #selector(openMeetingFolder))
         menu.addItem(.separator())
 
         for (code, name) in [("fr", "Français"), ("en", "English"), ("auto", "Détection automatique")] {
@@ -464,6 +592,18 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openSettings() { settingsWindow.show() }
+
+    @objc private func startMeetingFromMenu(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String, let mode = MeetingMode(rawValue: raw) { startMeeting(mode) }
+    }
+
+    @objc private func stopMeetingFromMenu() { stopMeeting() }
+
+    @objc private func openMeetingFolder() {
+        let folder = MeetingFolder.current()
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(folder)
+    }
 
     @objc private func chooseLanguage(_ sender: NSMenuItem) {
         if let code = sender.representedObject as? String { language = code }
@@ -504,7 +644,51 @@ func runTranscribeTest(path: String, language: String) -> Never {
     dispatchMain()
 }
 
+/// Lit les echantillons d'un WAV 16 kHz mono 16 bits.
+func samples(fromWAV path: String) -> [Int16] {
+    guard let data = FileManager.default.contents(atPath: path), let range = data.range(of: Data("data".utf8)) else { return [] }
+    let body = data[(range.upperBound + 4)...]
+    return body.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) }
+}
+
+/// `Emile --meeting-test micro.wav ordi.wav dossier` : simule une reunion a partir de deux fichiers.
+func runMeetingTest(mic: String, system: String, folder: String) -> Never {
+    let server = WhisperServer()
+    Task { @MainActor in
+        await server.start()
+        guard await server.waitUntilReady() else { print("ERREUR: serveur indisponible"); exit(1) }
+        let micSamples = samples(fromWAV: mic), systemSamples = samples(fromWAV: system)
+        let output = URL(fileURLWithPath: folder, isDirectory: true)
+        try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let session = MeetingSession(mode: .online, author: "Martin", folder: output, language: "fr")
+        let started = Date()
+        var index = 0
+        while index < max(micSamples.count, systemSamples.count) {
+            let end = index + 16000
+            session.feed(mic: Array(micSamples[min(index, micSamples.count)..<min(end, micSamples.count)]),
+                         system: Array(systemSamples[min(index, systemSamples.count)..<min(end, systemSamples.count)]),
+                         final: false)
+            index = end
+        }
+        session.feed(mic: [], system: [], final: true)
+        session.stop(title: "Test réunion") { url in
+            print(String(format: "Temps de transcription : %.1f s", Date().timeIntervalSince(started)))
+            for line in session.transcript.sorted(by: { $0.start < $1.start }) {
+                print("[\(MeetingDocument.timestamp(line.start))] \(line.speaker) : \(line.text)")
+            }
+            print("FICHIER: \(url?.path ?? "aucun")")
+            server.stop()
+            exit(url == nil ? 1 : 0)
+        }
+    }
+    dispatchMain()
+}
+
 let arguments = CommandLine.arguments
+if arguments.count >= 5, arguments[1] == "--meeting-test" {
+    Pref.register()
+    runMeetingTest(mic: arguments[2], system: arguments[3], folder: arguments[4])
+}
 if arguments.count >= 3, arguments[1] == "--transcribe" {
     runTranscribeTest(path: arguments[2], language: arguments.count > 3 ? arguments[3] : "fr")
 }
