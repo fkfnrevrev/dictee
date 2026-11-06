@@ -69,6 +69,16 @@ Par défaut, Emile écrit dans **VENTILO DRIVE › 07_TRANSCRIPTIONS**, via Goog
 
 Tant que le Drive n'est pas relié, les réunions vont dans `Documents/Réunions Emile`. Tu peux aussi choisir un autre dossier dans **Réglages → Réunions**, et y indiquer ton prénom, qui signe tes fichiers.
 
+### Les comptes rendus par Claude
+
+À la fin de chaque réunion, Emile envoie le **texte** de la transcription à Claude, via [Claude Code](https://claude.com/claude-code) installé sur le Mac. Ça passe par ton abonnement Claude, sans frais en plus. Claude écrit un compte rendu en Word, avec résumé, décisions, tâches, chiffres clés, personnes citées et questions en suspens, et le range dans **08_RESUMES** sous le même nom que la transcription.
+
+Emile tient aussi à jour **00_Journal des réunions.docx**, qui rassemble tous les comptes rendus, du plus récent au plus ancien. C'est la mémoire de toutes vos réunions, à donner à Claude pour retrouver une décision ou une tâche.
+
+Les réunions du dossier qui n'ont pas encore de compte rendu, y compris celles enregistrées sur un autre Mac, sont traitées toutes les 10 minutes, une à la fois. L'audio ne quitte jamais le Mac : seul le texte est envoyé à Claude. Tu peux couper les comptes rendus dans **Réglages → Comptes rendus**.
+
+Il faut que Claude Code soit installé et connecté : tape `claude` dans le Terminal une fois pour te connecter.
+
 ### Autorisation pour le son des visios
 
 Pour entendre les autres, macOS demande l'autorisation **Enregistrement de l'écran** (Réglages Système → Confidentialité et sécurité). Emile n'utilise pas l'image de l'écran. Après l'avoir donnée, relance Emile. Comme pour l'Accessibilité, il faut parfois la redonner après une mise à jour.
@@ -90,6 +100,12 @@ Après une recompilation, macOS peut redemander l'Accessibilité. Si la touche n
 ```
 
 Le fichier doit être un WAV 16 kHz mono en 16 bits.
+
+Pour faire résumer une transcription par Claude :
+
+```bash
+/Applications/Emile.app/Contents/MacOS/Emile --summary-test transcription.docx dossier-de-sortie
+```
 
 Pour simuler une réunion à partir de deux fichiers (ton micro, puis le son de l'ordi) :
 

@@ -20,6 +20,8 @@ struct SettingsView: View {
     @AppStorage(Pref.meetingMode) private var meetingMode = MeetingMode.online.rawValue
     @AppStorage(Pref.meetingFolder) private var meetingFolder = ""
     @ObservedObject private var library = MeetingLibrary.shared
+    @ObservedObject private var summaries = SummaryService.shared
+    @AppStorage(Pref.summaryEnabled) private var summaryEnabled = true
 
     var body: some View {
         Form {
@@ -119,6 +121,36 @@ struct SettingsView: View {
                 Text("Réunions")
             } footer: {
                 Text("Le prénom signe tes transcriptions dans le dossier partagé. Emile n'enregistre jamais l'image de l'écran : macOS demande cette autorisation pour laisser capter le son des visios.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Faire un compte rendu de chaque réunion avec Claude", isOn: $summaryEnabled)
+                LabeledContent("Claude Code") {
+                    if summaries.available {
+                        Label("Installé sur ce Mac", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    } else {
+                        Text("Introuvable : installe Claude Code").foregroundStyle(.orange)
+                    }
+                }
+                LabeledContent("Comptes rendus") {
+                    Text(MeetingFolder.shortPath(SummaryService.folder(for: library.folder))).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.head)
+                }
+                HStack {
+                    if let error = summaries.lastError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.callout)
+                    }
+                    Spacer()
+                    Button(summaries.busy ? "Claude travaille…" : "Résumer maintenant les réunions en attente") {
+                        summaries.scan(force: true)
+                    }
+                    .disabled(!summaryEnabled || !summaries.available || summaries.busy)
+                }
+            } header: {
+                Text("Comptes rendus")
+            } footer: {
+                Text("Quand une réunion se termine, Emile envoie le texte de la transcription à Claude, avec ton abonnement Claude et sans frais en plus. Claude écrit le compte rendu (résumé, décisions, tâches, chiffres clés) dans un fichier Word, et l'ajoute au « Journal des réunions », qui rassemble tous les comptes rendus. Les réunions du dossier qui n'ont pas encore de compte rendu sont aussi traitées, une à la fois. L'audio ne quitte jamais ce Mac : seul le texte est envoyé à Claude.")
                     .foregroundStyle(.secondary)
             }
 

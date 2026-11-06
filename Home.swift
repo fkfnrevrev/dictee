@@ -51,8 +51,9 @@ struct HomeContent: View {
             header
             MeetingHero(model: model, folder: folder)
             if let saved = model.lastSavedMeeting, model.meeting == nil {
-                SavedBanner(url: saved) { model.lastSavedMeeting = nil }
+                SavedBanner(file: MeetingFile(url: saved)) { model.lastSavedMeeting = nil }
             }
+            HowItWorks(folder: folder)
             HStack(alignment: .top, spacing: 18) {
                 Card {
                     VStack(alignment: .leading, spacing: 6) {
@@ -76,6 +77,7 @@ struct HomeContent: View {
                 }
                 VStack(spacing: 18) {
                     WeekCard(week: week, todayWords: summary.todayWords)
+                    ClaudeCard()
                     FolderCard(folder: folder)
                 }
                 .frame(width: 290)
@@ -164,7 +166,7 @@ struct MeetingHero: View {
             Text("RÉUNIONS").font(.caption.weight(.semibold)).tracking(1.6).foregroundStyle(.white.opacity(0.7))
             Text("Transcris ta prochaine réunion")
                 .font(.system(size: 28, weight: .semibold)).foregroundStyle(.white)
-            Text("Le son reste sur ton Mac. Seul le texte part dans \(MeetingFolder.shortPath(folder)).")
+            Text("Emile écrit tout ce qui se dit dans un fichier Word, puis Claude en fait le compte rendu. Le son, lui, ne quitte jamais ton Mac.")
                 .foregroundStyle(.white.opacity(0.75))
                 .frame(maxWidth: 460, alignment: .leading)
             HStack(spacing: 10) {
@@ -279,24 +281,139 @@ struct HeroWave: View {
 }
 
 struct SavedBanner: View {
-    let url: URL
+    let file: MeetingFile
     var onClose: () -> Void
+    @ObservedObject private var service = SummaryService.shared
 
     var body: some View {
+        let state = service.state(for: file)
         HStack(spacing: 12) {
-            Image(systemName: "checkmark.circle.fill").font(.title2).foregroundStyle(.green)
+            Image(systemName: state == .done ? "sparkles" : "checkmark.circle.fill").font(.title2)
+                .foregroundStyle(state == .done ? emileOrange : .green)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Réunion enregistrée").font(.headline)
-                Text(url.lastPathComponent).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                Text(headline(state)).font(.headline)
+                Text(detail(state)).font(.callout).foregroundStyle(.secondary).lineLimit(2)
             }
             Spacer()
-            Button("Ouvrir") { NSWorkspace.shared.open(url) }
-            Button("Afficher") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            Button("Transcription") { NSWorkspace.shared.open(file.url) }
+            if state == .done {
+                Button("Compte rendu") { NSWorkspace.shared.open(service.summaryURL(for: file)) }
+                    .buttonStyle(.borderedProminent).tint(emileOrange)
+            }
             Button { onClose() } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.green.opacity(0.08)))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.green.opacity(0.25)))
+    }
+
+    private func headline(_ state: SummaryService.State) -> String {
+        switch state {
+        case .done: return "Compte rendu prêt"
+        case .working, .waiting: return service.enabled && service.available ? "Réunion enregistrée · Claude écrit le compte rendu…" : "Réunion enregistrée"
+        case .skipped: return "Réunion enregistrée"
+        case .failed: return "Réunion enregistrée · compte rendu pas encore fait"
+        }
+    }
+
+    private func detail(_ state: SummaryService.State) -> String {
+        switch state {
+        case .done: return "Décisions, tâches et chiffres clés sont dans \(SummaryService.folder.lastPathComponent)."
+        case .working, .waiting: return file.url.lastPathComponent
+        case .skipped: return "Trop courte pour un compte rendu."
+        case .failed(let message): return message
+        }
+    }
+}
+
+/// Les trois etapes, toujours visibles, pour comprendre ou va quoi.
+struct HowItWorks: View {
+    let folder: URL
+
+    var body: some View {
+        let transcripts = MeetingFolder.isCloud(folder) ? folder.lastPathComponent : "ton dossier"
+        let summaries = SummaryService.folder(for: folder).lastPathComponent
+        Card {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Comment ça marche").font(.title2.weight(.semibold))
+                HStack(alignment: .top, spacing: 0) {
+                    step(1, "mic.fill", "Emile écoute",
+                         "Ton micro et, en visio, le son de l'ordi. Tout est transcrit sur ce Mac, l'audio est effacé au fur et à mesure.")
+                    arrow
+                    step(2, "doc.text.fill", "La transcription",
+                         "Tout ce qui s'est dit, avec qui parle et à quelle minute, dans un fichier Word rangé dans \(transcripts).")
+                    arrow
+                    step(3, "sparkles", "Le compte rendu",
+                         "À la fin, Claude lit la transcription et écrit décisions, tâches et chiffres clés dans \(summaries), plus le Journal des réunions.")
+                }
+            }
+        }
+    }
+
+    private var arrow: some View {
+        Image(systemName: "arrow.right").foregroundStyle(.tertiary).padding(.top, 8).padding(.horizontal, 10)
+    }
+
+    private func step(_ number: Int, _ symbol: String, _ title: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("\(number)").font(.caption.weight(.bold)).foregroundStyle(.white)
+                    .frame(width: 22, height: 22).background(Circle().fill(emileOrange))
+                Image(systemName: symbol).foregroundStyle(emileOrange)
+                Text(title).font(.headline)
+            }
+            Text(text).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Etat des comptes rendus faits par Claude.
+struct ClaudeCard: View {
+    @ObservedObject private var service = SummaryService.shared
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("COMPTES RENDUS").font(.caption.weight(.medium)).tracking(1.2).foregroundStyle(.secondary)
+                status
+                if service.enabled && service.available {
+                    HStack {
+                        Button("Ouvrir le journal") { NSWorkspace.shared.open(SummaryService.journal) }
+                            .disabled(!FileManager.default.fileExists(atPath: SummaryService.journal.path))
+                        Button("Dossier") {
+                            try? FileManager.default.createDirectory(at: SummaryService.folder, withIntermediateDirectories: true)
+                            NSWorkspace.shared.open(SummaryService.folder)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var status: some View {
+        if !service.enabled {
+            Label("Désactivés", systemImage: "pause.circle.fill").font(.headline).foregroundStyle(.secondary)
+            Text("Active-les dans Réglages › Comptes rendus.").font(.callout).foregroundStyle(.secondary)
+        } else if !service.available {
+            Label("Claude Code introuvable", systemImage: "exclamationmark.circle.fill").font(.headline).foregroundStyle(emileOrange)
+            Text("Installe Claude Code sur ce Mac pour que Claude résume tes réunions.").font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if service.busy {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Claude écrit un compte rendu…").font(.headline)
+            }
+        } else if let error = service.lastError {
+            Label("En pause", systemImage: "exclamationmark.triangle.fill").font(.headline).foregroundStyle(emileOrange)
+            Text(error).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        } else {
+            Label("Claude est prêt", systemImage: "sparkles").font(.headline).foregroundStyle(emileOrange)
+            Text(service.summaryCount == 0 ? "Chaque réunion terminée recevra son compte rendu."
+                 : "\(service.summaryCount) compte\(service.summaryCount > 1 ? "s" : "") rendu\(service.summaryCount > 1 ? "s" : "") dans \(SummaryService.folder.lastPathComponent).")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
@@ -356,7 +473,7 @@ struct EmptyMeetings: View {
         VStack(alignment: .leading, spacing: 6) {
             Image(systemName: "waveform").font(.title).foregroundStyle(emileOrange)
             Text("Pas encore de réunion").font(.headline)
-            Text("Lance-en une ci-dessus : le fichier Word apparaîtra ici, et chez Noé aussi.")
+            Text("Lance-en une ci-dessus : sa transcription apparaîtra ici, puis son compte rendu. Les réunions enregistrées par les autres membres du dossier partagé s'affichent aussi.")
                 .font(.callout).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -372,31 +489,34 @@ struct MeetingRow: View {
     @State private var hover = false
 
     var body: some View {
-        Button { NSWorkspace.shared.open(file.url) } label: {
+        HStack(spacing: 14) {
             HStack(spacing: 14) {
                 RoundedRectangle(cornerRadius: 9)
                     .fill(emileOrange.opacity(0.12))
                     .frame(width: 36, height: 36)
                     .overlay(Image(systemName: live ? "record.circle" : "doc.text.fill")
                         .foregroundStyle(live ? Color.red : emileOrange))
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(file.title).font(.body.weight(.medium)).lineLimit(1)
-                    Text(live ? "En cours…" : Self.when(file.date)).font(.callout).foregroundStyle(.secondary)
+                    Text(live ? "En cours…" : Self.when(file.date)).font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Spacer()
-                if !file.author.isEmpty { Avatar(name: file.author) }
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-                    .opacity(hover ? 1 : 0)
+                Spacer(minLength: 8)
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 6)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(hover ? 0.05 : 0)))
             .contentShape(Rectangle())
+            .onTapGesture { NSWorkspace.shared.open(file.url) }
+            .help("Ouvrir la transcription")
+            if !live { SummaryBadge(file: file) }
+            if !file.author.isEmpty { Avatar(name: file.author, compact: true) }
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 6)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(hover ? 0.05 : 0)))
         .onHover { hover = $0 }
         .contextMenu {
-            Button("Ouvrir") { NSWorkspace.shared.open(file.url) }
+            Button("Ouvrir la transcription") { NSWorkspace.shared.open(file.url) }
+            if SummaryService.shared.state(for: file) == .done {
+                Button("Ouvrir le compte rendu") { NSWorkspace.shared.open(SummaryService.shared.summaryURL(for: file)) }
+            }
             Button("Afficher dans le Finder") { NSWorkspace.shared.activateFileViewerSelecting([file.url]) }
         }
     }
@@ -414,8 +534,51 @@ struct MeetingRow: View {
     }
 }
 
+/// A droite de chaque reunion : ou en est son compte rendu.
+struct SummaryBadge: View {
+    let file: MeetingFile
+    @ObservedObject private var service = SummaryService.shared
+
+    var body: some View {
+        switch service.state(for: file) {
+        case .done:
+            Button { NSWorkspace.shared.open(service.summaryURL(for: file)) } label: {
+                Label("Compte rendu", systemImage: "sparkles")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .foregroundStyle(emileOrange)
+                    .background(Capsule().fill(emileOrange.opacity(0.12)))
+            }
+            .buttonStyle(.plain)
+            .help("Ouvrir le compte rendu écrit par Claude")
+        case .working:
+            tag(Text("Claude résume…"), color: emileOrange, spinner: true).help("Claude écrit le compte rendu")
+        case .waiting:
+            if service.enabled && service.available {
+                tag(Text("Bientôt"), color: .secondary).help("Le compte rendu sera écrit par Claude dans quelques minutes")
+            }
+        case .skipped:
+            tag(Text("Trop courte"), color: .secondary)
+        case .failed(let message):
+            tag(Text("Nouvel essai bientôt"), color: emileOrange).help(message)
+        }
+    }
+
+    private func tag(_ text: Text, color: Color, spinner: Bool = false) -> some View {
+        HStack(spacing: 6) {
+            if spinner { ProgressView().controlSize(.mini) }
+            text
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(color)
+        .padding(.horizontal, 9).padding(.vertical, 4)
+        .background(Capsule().strokeBorder(Color(nsColor: .separatorColor)))
+    }
+}
+
 struct Avatar: View {
     let name: String
+    var compact = false
 
     var body: some View {
         // Toi en orange, les autres en bleu, comme dans les fichiers Word.
@@ -424,8 +587,9 @@ struct Avatar: View {
         HStack(spacing: 6) {
             Circle().fill(color.opacity(0.18)).frame(width: 24, height: 24)
                 .overlay(Text(String(name.prefix(1)).uppercased()).font(.caption.weight(.bold)).foregroundStyle(color))
-            Text(name).font(.callout).foregroundStyle(.secondary)
+            if !compact { Text(name).font(.callout).foregroundStyle(.secondary) }
         }
+        .help(name)
     }
 }
 
@@ -493,7 +657,7 @@ struct MeetingsContent: View {
                     }
                 }
             }
-            Text("Demande à Claude : « résume ma dernière réunion » ou « qu'a-t-on décidé avec ce client ? ». Il lit ces fichiers dans le Drive.")
+            Text("Clique sur une réunion pour lire sa transcription, ou sur « Compte rendu » pour le résumé de Claude. Tu peux aussi demander à Claude : « qu'a-t-on décidé avec ce client ? », il retrouvera la réponse dans le Journal des réunions.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
         .padding(28)

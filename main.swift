@@ -236,6 +236,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         appModel.onStartMeeting = { [weak self] mode in self?.startMeeting(mode) }
         appModel.onStopMeeting = { [weak self] in self?.stopMeeting() }
         MeetingLibrary.shared.refresh()
+        SummaryService.shared.startTimer()
         stateChanged()
 
         AVCaptureDevice.requestAccess(for: .audio) { _ in }
@@ -468,6 +469,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 MeetingLog.shared.add(MeetingRecord(date: session.startedAt, seconds: Date().timeIntervalSince(session.startedAt),
                                                     words: session.wordCount))
                 appModel.lastSavedMeeting = url
+                SummaryService.shared.summarizeSoon(url)
             } else {
                 self.note = "Réunion terminée : rien n'a été transcrit"
             }
@@ -684,7 +686,23 @@ func runMeetingTest(mic: String, system: String, folder: String) -> Never {
     dispatchMain()
 }
 
+/// `Emile --summary-test transcription.docx dossier` : fait resumer une transcription par Claude.
+func runSummaryTest(path: String, folder: String) -> Never {
+    let output = URL(fileURLWithPath: folder, isDirectory: true)
+    try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+    let started = Date()
+    SummaryService.shared.summarizeForTest(URL(fileURLWithPath: path), into: output) { state in
+        print(String(format: "Durée : %.0f s, état : %@", Date().timeIntervalSince(started), "\(state)"))
+        exit(state == .done ? 0 : 1)
+    }
+    dispatchMain()
+}
+
 let arguments = CommandLine.arguments
+if arguments.count >= 4, arguments[1] == "--summary-test" {
+    Pref.register()
+    runSummaryTest(path: arguments[2], folder: arguments[3])
+}
 if arguments.count >= 5, arguments[1] == "--meeting-test" {
     Pref.register()
     runMeetingTest(mic: arguments[2], system: arguments[3], folder: arguments[4])

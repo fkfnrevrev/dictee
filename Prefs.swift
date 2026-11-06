@@ -18,6 +18,8 @@ enum Pref {
     static let userName = "userName"
     static let meetingFolder = "meetingFolder"
     static let meetingMode = "meetingMode"
+    static let summaryEnabled = "summaryEnabled"
+    static let summarySkipped = "summarySkipped"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -25,7 +27,7 @@ enum Pref {
             barVisible: true, barAlways: true, barSize: 1.0, barOpacity: 0.92, barOffset: 14.0, barStyle: "orange",
             soundOn: true, soundName: "bulle", soundAtEnd: true, soundVolume: 0.35,
             userName: NSFullUserName().split(separator: " ").first.map(String.init) ?? "Moi",
-            meetingFolder: "", meetingMode: MeetingMode.online.rawValue,
+            meetingFolder: "", meetingMode: MeetingMode.online.rawValue, summaryEnabled: true,
         ])
     }
 }
