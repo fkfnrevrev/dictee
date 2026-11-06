@@ -87,7 +87,7 @@ struct SettingsView: View {
             }
 
             Section("Dictée") {
-                LabeledContent("Raccourci") { Text("Maintenir ⌘ droite").foregroundStyle(.secondary) }
+                LabeledContent("Raccourci") { Text("Maintenir fn 🌐").foregroundStyle(.secondary) }
                 Picker("Langue", selection: $language) {
                     Text("Français").tag("fr")
                     Text("English").tag("en")
@@ -98,19 +98,56 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 720)
+        .frame(maxWidth: 640)
+        .frame(maxWidth: .infinity)
         .onChange(of: soundName) { _ in Sounds.play(start: true, preview: true) }
     }
 }
 
-final class SettingsWindow {
+/// Fenetre principale : un menu a gauche, comme Wispr Flow.
+struct MainView: View {
+    enum Page: Hashable { case stats, settings }
+
+    @ObservedObject var model: AppModel
+    @ObservedObject var stats: StatsStore
+    @State private var page: Page? = .stats
+
+    var body: some View {
+        NavigationSplitView {
+            List(selection: $page) {
+                Label("Statistiques", systemImage: "chart.bar.xaxis").tag(Page.stats)
+                Label("Réglages", systemImage: "gearshape").tag(Page.settings)
+            }
+            .safeAreaInset(edge: .top) {
+                HStack(spacing: 10) {
+                    Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 28, height: 28)
+                    Text("Emile").font(.title3.weight(.semibold))
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
+            .navigationSplitViewColumnWidth(190)
+        } detail: {
+            switch page ?? .stats {
+            case .stats: StatsView(stats: stats)
+            case .settings: SettingsView(model: model)
+            }
+        }
+        .frame(minWidth: 860, minHeight: 600)
+    }
+}
+
+final class MainWindow {
     private var window: NSWindow?
 
     func show() {
         if window == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(model: appModel)))
+            let controller = NSHostingController(rootView: MainView(model: appModel, stats: StatsStore.shared))
+            let window = NSWindow(contentViewController: controller)
             window.title = "Emile"
-            window.styleMask = [.titled, .closable, .miniaturizable]
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+            window.setContentSize(NSSize(width: 1000, height: 720))
             window.isReleasedWhenClosed = false
             window.center()
             self.window = window

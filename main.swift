@@ -1,4 +1,4 @@
-// Emile : maintiens Commande droite, parle, relache. Le texte s'ecrit au curseur.
+// Emile : maintiens fn, parle, relache. Le texte s'ecrit au curseur.
 // Tout reste sur le Mac : whisper-server n'ecoute que sur 127.0.0.1 et l'audio n'est jamais ecrit sur disque.
 
 import ApplicationServices
@@ -6,8 +6,8 @@ import AVFoundation
 import Cocoa
 import ServiceManagement
 
-let rightCommandKeycode: Int64 = 54
-let rightCommandDeviceFlag: UInt64 = 0x10  // NX_DEVICERCMDKEYMASK
+let hotkeyKeycode: Int64 = 63  // fn (globe), en bas a gauche du clavier
+let hotkeyFlag = CGEventFlags.maskSecondaryFn.rawValue
 let minimumDuration: TimeInterval = 0.3
 let maximumDuration: TimeInterval = 300
 let serverPort = 8178
@@ -190,7 +190,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private let server = WhisperServer()
     private let recorder = Recorder()
-    private let settingsWindow = SettingsWindow()
+    private let settingsWindow = MainWindow()
     private var overlay: OverlayPanel?
     private var statusItem: NSStatusItem!
     private var state = State.loading { didSet { stateChanged() } }
@@ -284,10 +284,10 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
         case .flagsChanged:
-            guard event.getIntegerValueField(.keyboardEventKeycode) == rightCommandKeycode else { return }
-            if event.flags.rawValue & rightCommandDeviceFlag != 0 { begin() } else { finish() }
+            guard event.getIntegerValueField(.keyboardEventKeycode) == hotkeyKeycode else { return }
+            if event.flags.rawValue & hotkeyFlag != 0 { begin() } else { finish() }
         default:
-            // Commande droite + autre touche ou clic : c'est un raccourci, pas une dictee.
+            // fn + autre touche (fleches, F1...) ou clic : c'est un raccourci, pas une dictee.
             if state == .recording { cancel() }
         }
     }
@@ -308,7 +308,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         state = .recording
         overlay?.reposition()
         // Le micro demarre tout de suite pour ne pas couper le premier mot, mais le son et la barre
-        // attendent un instant : un raccourci comme Cmd+C ne declenche ainsi ni l'un ni l'autre.
+        // attendent un instant : un raccourci comme fn+fleche ne declenche ainsi ni l'un ni l'autre.
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.state == .recording else { return }
             self.confirmed = true
@@ -339,8 +339,10 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func finish() {
         guard state == .recording else { return }
         let samples = stopRecording()
+        let duration = Date().timeIntervalSince(startedAt)
+        let appID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "inconnu"
         if confirmed { Sounds.play(start: false) }
-        guard Date().timeIntervalSince(startedAt) >= minimumDuration, !isSilent(samples) else {
+        guard duration >= minimumDuration, !isSilent(samples) else {
             state = .idle
             return
         }
@@ -352,6 +354,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if !text.isEmpty {
                     lastText = text
                     paste(text + " ")
+                    StatsStore.shared.add(words: text.split(whereSeparator: \.isWhitespace).count,
+                                          seconds: duration, app: appID)
                 }
             } catch {
                 note = "Échec de la transcription"
@@ -400,7 +404,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let note { return note }
         switch state {
         case .loading: return "Chargement du modèle…"
-        case .idle: return eventTap == nil ? "En attente de l'autorisation Accessibilité" : "Prêt : maintiens Commande droite"
+        case .idle: return eventTap == nil ? "En attente de l'autorisation Accessibilité" : "Prêt : maintiens fn"
         case .recording: return "Écoute…"
         case .transcribing: return "Transcription…"
         }

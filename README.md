@@ -1,6 +1,6 @@
 # Emile
 
-Dictée vocale 100 % locale pour Mac : maintiens **Commande droite**, parle, relâche, et le texte s'écrit au curseur, dans n'importe quelle app.
+Dictée vocale 100 % locale pour Mac : maintiens **fn** (🌐, en bas à gauche du clavier), parle, relâche, et le texte s'écrit au curseur, dans n'importe quelle app.
 
 La transcription tourne sur le Mac avec [whisper.cpp](https://github.com/ggml-org/whisper.cpp). Le moteur n'écoute que sur `127.0.0.1` et l'audio n'est jamais écrit sur le disque.
 
@@ -42,7 +42,9 @@ Une petite barre flottante en bas de l'écran s'agrandit pendant la dictée, et 
 
 La fenêtre de réglages s'ouvre au lancement d'Emile, ou depuis l'icône de la barre de menus → **Réglages…**. Tu peux y régler la barre (couleur, taille, opacité, hauteur), le son, la langue et le lancement au démarrage du Mac.
 
-Commande droite + une autre touche (comme `Cmd` + `C`) annule la dictée, donc tes raccourcis continuent de marcher.
+fn + une autre touche (comme fn + flèche) annule la dictée, donc tes raccourcis continuent de marcher.
+
+Pour que fn ne fasse rien d'autre : Réglages Système → Clavier → « Appuyer sur la touche 🌐 pour » → **Ne rien faire**. Si Wispr Flow est installé, change son raccourci ou quitte-le, car il utilise aussi fn par défaut.
 
 Le menu de l'icône permet aussi de recopier la dernière dictée.
 
