@@ -36,7 +36,8 @@ struct OverlayView: View {
         let phase = model.displayedPhase
         let active = phase == .recording || phase == .transcribing || phase == .meeting
         let scale = CGFloat(size)
-        let width = (phase == .meeting ? 78 : active ? 68 : 38) * scale
+        let locked = phase == .recording && model.handsFree
+        let width = (phase == .meeting ? 78 : locked ? 84 : active ? 68 : 38) * scale
         let height = (active ? 20 : 8) * scale
         let shown = visible && (always || active)
 
@@ -45,8 +46,17 @@ struct OverlayView: View {
                 .fill(gradient)
                 .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.6))
             if phase == .recording {
-                LevelBars(level: model.level, maxHeight: height * 0.62, scale: scale)
-                    .transition(.opacity)
+                HStack(spacing: 6 * scale) {
+                    if locked {
+                        // Mains libres : un appui sur fn termine la dictee.
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 8 * scale, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                    LevelBars(level: model.level, maxHeight: height * 0.62, scale: scale)
+                }
+                .transition(.opacity)
             } else if phase == .transcribing {
                 ThinkingDots(scale: scale).transition(.opacity)
             } else if phase == .meeting, let start = model.meeting?.startedAt {
@@ -57,6 +67,7 @@ struct OverlayView: View {
         .shadow(color: .black.opacity(0.35), radius: 5 * scale, y: 2)
         .opacity(shown ? (phase == .loading ? opacity * 0.5 : opacity) : 0)
         .animation(.spring(response: 0.3, dampingFraction: 0.72), value: active)
+        .animation(.spring(response: 0.3, dampingFraction: 0.72), value: locked)
         .animation(.easeInOut(duration: 0.2), value: shown)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.bottom, 16)

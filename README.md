@@ -44,6 +44,8 @@ Une petite barre flottante en bas de l'écran s'agrandit pendant la dictée, et 
 
 La fenêtre de réglages s'ouvre au lancement d'Emile, ou depuis l'icône de la barre de menus → **Réglages…**. Tu peux y régler la barre (couleur, taille, opacité, hauteur), le son, la langue et le lancement au démarrage du Mac.
 
+**Mains libres** : appuie deux fois rapidement sur fn. La dictée reste ouverte sans que tu tiennes la touche (un petit cadenas apparaît dans la barre). Tu peux taper ou cliquer ailleurs pendant ce temps. Appuie une fois sur fn pour terminer et coller le texte, ou sur Échap pour annuler. La dictée mains libres s'arrête toute seule au bout de 10 minutes.
+
 fn + une autre touche (comme fn + flèche) annule la dictée, donc tes raccourcis continuent de marcher.
 
 Pour que fn ne fasse rien d'autre : Réglages Système → Clavier → « Appuyer sur la touche 🌐 pour » → **Ne rien faire**. Si Wispr Flow est installé, change son raccourci ou quitte-le, car il utilise aussi fn par défaut.

@@ -46,6 +46,8 @@ final class AppModel: ObservableObject {
     var displayedPhase: Phase { demoPhase ?? phase }
 
     // Reunion en cours, affichee dans l'accueil et dans la barre.
+    /// Dictee verrouillee par un double appui sur fn.
+    @Published var handsFree = false
     @Published var meeting: LiveMeeting?
     @Published var meetingTitle = ""
     @Published var lastSavedMeeting: URL?

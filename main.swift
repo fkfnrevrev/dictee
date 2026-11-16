@@ -14,6 +14,9 @@ let maximumMeeting: TimeInterval = 4 * 3600
 /// fn + Commande droite demarre ou arrete une reunion.
 let rightCommandKeycode: Int64 = 54
 let rightCommandFlag: UInt64 = 0x10  // NX_DEVICERCMDKEYMASK : seulement la touche de droite
+let escapeKeycode: Int64 = 53
+/// Double appui sur fn : dictee mains libres, jusqu'au prochain appui sur fn.
+let maximumHandsFree: TimeInterval = 600
 let serverPort = 8178
 let serverBase = URL(string: "http://127.0.0.1:\(serverPort)")!
 let serverBinary = "/opt/homebrew/bin/whisper-server"
@@ -218,7 +221,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastText = ""
     private var meeting: MeetingSession?
     private var meetingLimit: Timer?
-    private var swallowRelease = false
+    private var hotkeys = HotkeyMachine()
 
     private var language: String {
         get { UserDefaults.standard.string(forKey: Pref.language) ?? "fr" }
@@ -310,28 +313,44 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let fnDown = event.flags.rawValue & hotkeyFlag != 0
             let rightCommandDown = event.flags.rawValue & rightCommandFlag != 0
             if keycode == rightCommandKeycode {
-                // fn deja tenue, puis Commande droite : reunion.
-                if rightCommandDown && fnDown { meetingShortcut() }
+                if rightCommandDown && fnDown { apply(.meetingCombo) }
                 return
             }
             guard keycode == hotkeyKeycode else { return }
             if fnDown {
-                // Commande droite deja tenue, puis fn : reunion aussi.
-                if rightCommandDown {
-                    meetingShortcut()
-                    return
-                }
-                begin()
+                apply(rightCommandDown ? .meetingCombo : .fnDown)
             } else {
-                if swallowRelease {
-                    swallowRelease = false
-                    return
-                }
-                finish()
+                apply(.fnUp)
             }
+        case .keyDown where event.getIntegerValueField(.keyboardEventKeycode) == escapeKeycode:
+            apply(.escape)
         default:
-            // fn + autre touche (fleches, F1...) ou clic : c'est un raccourci, pas une dictee.
+            apply(.other)
+        }
+    }
+
+    private func apply(_ input: HotkeyMachine.Input) {
+        switch hotkeys.handle(input, at: Date(), idle: state == .idle, recording: state == .recording) {
+        case .none: break
+        case .begin: begin()
+        case .beginHandsFree:
+            begin()
+            if state == .recording {
+                appModel.handsFree = true
+                // En mains libres, on peut parler plus longtemps.
+                limitTimer?.invalidate()
+                limitTimer = Timer.scheduledTimer(withTimeInterval: maximumHandsFree, repeats: false) { [weak self] _ in
+                    self?.finish()
+                }
+                stateChanged()
+            } else {
+                hotkeys.recordingEnded()
+            }
+        case .finish: finish()
+        case .cancel: if state == .recording { cancel() }
+        case .toggleMeeting:
             if state == .recording { cancel() }
+            toggleMeeting()
         }
     }
 
@@ -371,6 +390,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         limitTimer?.invalidate()
         let samples = recorder.stop()
         appModel.level = 0
+        appModel.handsFree = false
+        hotkeys.recordingEnded()
         return samples
     }
 
@@ -409,13 +430,6 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: Reunion
-
-    private func meetingShortcut() {
-        // Relacher fn ensuite ne doit pas finir une dictee.
-        swallowRelease = true
-        if state == .recording { cancel() }
-        toggleMeeting()
-    }
 
     private func toggleMeeting() {
         if state == .meeting {
@@ -525,7 +539,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch state {
         case .loading: return "Chargement du modèle…"
         case .idle: return eventTap == nil ? "En attente de l'autorisation Accessibilité" : "Prêt : maintiens fn"
-        case .recording: return "Écoute…"
+        case .recording: return appModel.handsFree ? "Mains libres : appuie sur fn pour terminer" : "Écoute…"
         case .transcribing: return meeting != nil ? "Enregistrement de la réunion…" : "Transcription…"
         case .meeting: return "Réunion en cours : fn + ⌘ droite pour arrêter"
         }

@@ -156,6 +156,7 @@ struct SettingsView: View {
 
             Section("Dictée") {
                 LabeledContent("Raccourci") { Text("Maintenir fn 🌐").foregroundStyle(.secondary) }
+                LabeledContent("Mains libres") { Text("Double-appui sur fn 🌐, puis fn pour terminer").foregroundStyle(.secondary) }
                 LabeledContent("Réunion") { Text("fn 🌐 + ⌘ droite (démarrer et arrêter)").foregroundStyle(.secondary) }
                 Picker("Langue", selection: $language) {
                     Text("Français").tag("fr")
